@@ -62,6 +62,14 @@ zig build -Dstrip=true                 # without debug info
 zig build test                         # unit tests of the Zig parts
 ```
 
+Emacs loads the module from `magit-git2-core-directory`, so point it at your
+build once:
+
+```sh
+mkdir -p ~/.emacs.d/magit-git2
+ln -s "$PWD/zig-out/lib/magit-git2-core.so" ~/.emacs.d/magit-git2/
+```
+
 The optimization mode defaults to `safe` (Zig 0.17's name for
 ReleaseSafe): bounds checks stay in, as a module crash is an Emacs crash.
 
@@ -83,25 +91,26 @@ libgit2's `src/util/process.h`.
 ## Release builds
 
 Building is optional. `magit-git2-core-ensure`, called when Magit loads,
-downloads the build for this system when there is no module file, and
-loads it. Which build is told from `system-type` and
-`system-configuration`: x86-64 Windows, or x86-64 Linux with glibc 2.28 or
+downloads the build for this system when `magit-git2-core-directory`
+(`~/.emacs.d/magit-git2/`) has no module, and loads it. That directory does
+not depend on what installed the Lisp. Which build is told from `system-type`
+and `system-configuration`: x86-64 Windows, or x86-64 Linux with glibc 2.28 or
 newer. Other systems stay with git unless they build the module.
 
 The download runs in the background with messages at its start and end, so
 Magit does not wait: it runs git until the module is there, and then
-`magit-git2-core-loaded-hook` runs. It takes `curl`, as a process blocks Emacs neither on DNS nor
-on TLS; Windows has one since version 10, and it reads the Windows certificate
-store. If it fails, the message says why and Magit goes on with git. Then
-`M-x magit-git2-download-module` tries again. Where the network blocks it, get
-the file from the release page and set `magit-git2-core-file` to it.
+`magit-git2-core-loaded-hook` runs. It takes `curl`, as a process blocks Emacs
+neither on DNS nor on TLS; Windows has one since version 10, and it reads the
+Windows certificate store. If it fails, the message says why and Magit goes on
+with git. Then `M-x magit-git2-download-module` tries again. Where the network
+blocks it, get the file from the release page and save it in that directory
+as `magit-git2-core.so` (`magit-git2-core.dll` on Windows).
 
-A build lands in `magit-git2-core-directory` (`~/.emacs.d/magit-git2/`) only
-if its SHA-256 is the one pinned in `lisp/magit-git2-release.el`, under a name
-with that hash: a new build goes beside a loaded one, which Windows would not
-let it replace. A module built here (`magit-git2-core-file`) has precedence
-and nothing is downloaded. `magit-git2-core-download` nil turns the download
-off.
+A release build lands there only if its SHA-256 is the one pinned in
+`lisp/magit-git2-release.el`, under a name with that hash: a new build goes
+beside a loaded one, which Windows would not let it replace. A
+`magit-git2-core.so` there has precedence and nothing is downloaded.
+`magit-git2-core-download` nil turns the download off.
 
 On master, when the sources of the module changed and the tests pass, CI
 publishes both builds as a GitHub release (artifacts of a run need a GitHub

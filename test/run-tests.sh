@@ -14,8 +14,9 @@
 #                  the temporary directory, removed afterwards)
 # EMACS            the Emacs to use (default: emacs)
 #
-# HOME, XDG_CONFIG_HOME and GIT_CONFIG_SYSTEM point into a temporary
-# directory, so neither git nor libgit2 sees your own config.
+# The module comes from zig-out/lib.  HOME, XDG_CONFIG_HOME and
+# GIT_CONFIG_SYSTEM point into a temporary directory, so neither git nor
+# libgit2 sees your own config.
 
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -47,5 +48,6 @@ XDG_CONFIG_HOME=$root/home/.config \
 GIT_CONFIG_SYSTEM=$root/etc/gitconfig \
     "$emacs" --batch --init-directory="$root/emacs" \
     -L "$here/lisp" -L "$here/test" $load_path \
+    --eval "(setq magit-git2-core-directory \"$here/zig-out/lib/\")" \
     -l magit-git2-test \
     --eval "(ert-run-tests-batch-and-exit '${1:-t})"

@@ -16,6 +16,10 @@ test/run-tests.sh '"download\\|platform"'  # tests by regexp
 MAGIT_GIT2_TEST_REPOS=~/src/a:~/src/b test/run-tests.sh
 ```
 
+Emacs loads the module from `magit-git2-core-directory`, not from `zig-out`:
+link your build there as the README shows. `test/run-tests.sh` uses
+`zig-out/lib`.
+
 ERT's output of a mismatch is huge: set `MAGIT_GIT2_TEST_REPORT=<file>` and
 read that instead. The repositories of Magit and Org are good stress cases,
 with 100+ tags and 29k commits with date ties.

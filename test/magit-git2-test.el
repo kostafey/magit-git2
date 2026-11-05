@@ -568,7 +568,6 @@ files `module-load' got in LOADED and the hook's runs in RAN."
                   (format "t1/magit-git2-core-%s%s" platform
                           module-file-suffix)
                   root))
-          (magit-git2-core-file (expand-file-name "unbuilt" root))
           (magit-git2-core-directory (expand-file-name "modules/" root))
           (magit-git2-core-release-url (concat "file://" root))
           (magit-git2-release-tag "t1")
@@ -668,10 +667,10 @@ files `module-load' got in LOADED and the hook's runs in RAN."
       (make-directory magit-git2-core-directory)
       (write-region "" nil file nil 'silent)
       (should (equal (file-only) file))
-      ;; The local build goes first.
-      (write-region "" nil magit-git2-core-file nil 'silent)
-      (should (equal (file-only) magit-git2-core-file))
-      (delete-file magit-git2-core-file)
+      ;; A module put in place by hand goes first.
+      (write-region "" nil (magit-git2-core--own-file) nil 'silent)
+      (should (equal (file-only) (magit-git2-core--own-file)))
+      (delete-file (magit-git2-core--own-file))
       ;; Downloaded anew, a file that does not load would not load either.
       (cl-letf (((symbol-function 'module-load)
                  (lambda (_) (error "Too old a glibc"))))

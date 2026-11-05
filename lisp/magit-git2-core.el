@@ -9,11 +9,12 @@
 
 ;;; Commentary:
 
-;; Loads magit-git2-core.so (.dll on Windows): the one `zig build' made
-;; in the directory above this one, else the release build, which
-;; `magit-git2-core-ensure' downloads.  Requiring this feature never
-;; fails: when the module cannot be loaded, `magit-git2-core-error' says
-;; why and `magit-git2-core-available-p' is nil.
+;; Loads the module from `magit-git2-core-directory', whatever installed
+;; this Lisp: magit-git2-core.so (.dll on Windows) put there by hand,
+;; else the release build, which `magit-git2-core-ensure' downloads.
+;; Requiring this feature never fails: when the module cannot be loaded,
+;; `magit-git2-core-error' says why and `magit-git2-core-available-p' is
+;; nil.
 ;;
 ;; A download is checked against the SHA-256 in magit-git2-release.el,
 ;; which CI commits with every release.  So a Lisp commit names exact
@@ -31,25 +32,15 @@
   "Answer Magit's read-only git queries in-process."
   :group 'magit-extensions)
 
-(defcustom magit-git2-core-file
-  ;; The true name of the source: a package manager may link it elsewhere.
-  (expand-file-name
-   (concat "../zig-out/lib/magit-git2-core" module-file-suffix)
-   (file-name-directory
-    (file-truename
-     (concat (file-name-sans-extension (or load-file-name buffer-file-name))
-             ".el"))))
-  "The magit-git2-core dynamic module built here.
-It has precedence over the release build."
-  :type 'file)
+(defcustom magit-git2-core-directory (locate-user-emacs-file "magit-git2/")
+  "Where the module lives.
+A magit-git2-core.so (.dll on Windows) put here by hand has precedence
+over the release build, which goes here too."
+  :type 'directory)
 
 (defcustom magit-git2-core-download t
-  "Whether to download the release build when no module is built here."
+  "Whether to download the release build when no module is at hand."
   :type 'boolean)
-
-(defcustom magit-git2-core-directory (locate-user-emacs-file "magit-git2/")
-  "Where the release build goes."
-  :type 'directory)
 
 (defcustom magit-git2-core-release-url
   "https://github.com/kostafey/magit-git2/releases/download"
@@ -92,11 +83,17 @@ See `magit-git2-core-ensure'.")
      (concat "magit-git2-core-" (substring sha256 0 12) module-file-suffix)
      magit-git2-core-directory)))
 
+(defun magit-git2-core--own-file ()
+  "The file of a module put in place by hand."
+  (expand-file-name (concat "magit-git2-core" module-file-suffix)
+                    magit-git2-core-directory))
+
 (defun magit-git2-core--file ()
   "The file to load the module from."
-  (or (and (file-exists-p magit-git2-core-file) magit-git2-core-file)
-      (magit-git2-core--released-file)
-      magit-git2-core-file))
+  (let ((own (magit-git2-core--own-file)))
+    (or (and (file-exists-p own) own)
+        (magit-git2-core--released-file)
+        own)))
 
 (defun magit-git2-core-load (&optional file)
   "Load the module from FILE (default `magit-git2-core--file').
@@ -106,7 +103,7 @@ Return non-nil on success; on failure set `magit-git2-core-error'."
           (cond ((not (and (fboundp 'module-load) module-file-suffix))
                  "this Emacs has no dynamic module support")
                 ((not (file-exists-p file))
-                 (format "%s does not exist; run `zig build'" file))
+                 (format "%s does not exist; see the README" file))
                 ((condition-case err
                      (progn (module-load file)
                             (setq magit-git2-core--loaded-file file)
