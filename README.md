@@ -65,7 +65,7 @@ libgit2's `src/util/process.h`.
 ## Use
 
 ```elisp
-(add-to-list 'load-path ".../foreign/magit-git2/lisp/")
+(add-to-list 'load-path ".../magit-git2/lisp/")
 (with-eval-after-load 'magit
   (require 'magit-git2))
 ```

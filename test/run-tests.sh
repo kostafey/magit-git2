@@ -46,6 +46,6 @@ HOME=$root/home \
 XDG_CONFIG_HOME=$root/home/.config \
 GIT_CONFIG_SYSTEM=$root/etc/gitconfig \
     "$emacs" --batch --init-directory="$root/emacs" \
-    $load_path -L "$here/lisp" -L "$here/test" \
+    -L "$here/lisp" -L "$here/test" $load_path \
     -l magit-git2-test \
     --eval "(ert-run-tests-batch-and-exit '${1:-t})"

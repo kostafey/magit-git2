@@ -1,0 +1,7 @@
+.zig-cache/
+zig-out*/
+zig-pkg/
+*.elc
+*-autoloads.el
+measure/report-*.org
+measure/*/
