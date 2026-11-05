@@ -13,6 +13,21 @@ shape's formatter answers. Every other call, and every call a formatter is
 not sure about, goes to git exactly as before. Asynchronous git (commit,
 push, fetch, rebase) is untouched.
 
+On Windows this took a status refresh from 4.28 s to 0.37 s on one real
+repository. On Linux, where a process is cheap, the gain is small.
+
+## Install
+
+```elisp
+(straight-use-package
+ '(magit-git2 :type git :host github :repo "kostafey/magit-git2"))
+```
+
+That is all: it loads with Magit, and the first time downloads the module
+for your system. See [Release builds](#release-builds). Without a package
+manager, add `lisp/` to `load-path` and call `(require 'magit-git2)` after
+Magit has loaded. It is not on MELPA yet.
+
 ## Layout
 
 ```
@@ -74,8 +89,8 @@ loads it. Which build is told from `system-type` and
 newer. Other systems stay with git unless they build the module.
 
 The download runs in the background with messages at its start and end, so
-Magit does not wait: it runs git until `magit-git2-core-loaded-hook` puts the
-module to use. It takes `curl`, as a process blocks Emacs neither on DNS nor
+Magit does not wait: it runs git until the module is there, and then
+`magit-git2-core-loaded-hook` runs. It takes `curl`, as a process blocks Emacs neither on DNS nor
 on TLS; Windows has one since version 10, and it reads the Windows certificate
 store. If it fails, the message says why and Magit goes on with git. Then
 `M-x magit-git2-download-module` tries again. Where the network blocks it, get
@@ -95,15 +110,6 @@ names exact builds, and that commit is CI's: pull before the next push.
 
 ## Use
 
-```elisp
-(add-to-list 'load-path ".../magit-git2/lisp/")
-(with-eval-after-load 'magit
-  (require 'magit-git2)
-  (add-hook 'magit-git2-core-loaded-hook
-            (lambda () (setq magit-git2-mode 'on)))
-  (magit-git2-core-ensure))
-```
-
 `magit-git2-mode` is one of:
 
 - `off`: always run git.
@@ -112,8 +118,8 @@ names exact builds, and that commit is CI's: pull before the next push.
   `*magit-git2-mismatches*`. Magit always gets git's result.
 - `on`: answer what the emulation understands, run git for the rest.
 
-The default is `on` on Windows and `shadow` elsewhere, or `off` when the
-module did not load. An unexpected Lisp error in the emulation sets the
+The default is `on` on Windows and `shadow` elsewhere; until the module is
+loaded, every call goes to git. An unexpected Lisp error in the emulation sets the
 mode to `off` for the session and is logged to `*magit-git2-log*`. A
 libgit2 error (signalled as `magit-git2-error`) only sends that one call
 to git.
@@ -135,9 +141,10 @@ sections for upstream and push-remote. Each goes after its neighbour in
 the hook's standard value. With the module on they are answered
 in-process.
 
-On Windows, `(magit-git2-set-system-config-from-git)` points libgit2 at
-the system config of Git for Windows (`<root>/etc/gitconfig`, or
-`<root>/mingw64/etc/gitconfig`), which libgit2 does not search by default.
+On Windows, `magit-git2-set-system-config-from-git` runs once the module is
+loaded and points libgit2 at the system config of Git for Windows
+(`<root>/etc/gitconfig`, or `<root>/mingw64/etc/gitconfig`), which libgit2
+does not search by default.
 
 Repository handles are cached per git directory during a Magit refresh
 and freed when it ends (`magit-unwind-refresh-hook`), or right after a

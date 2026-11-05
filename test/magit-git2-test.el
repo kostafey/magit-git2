@@ -449,6 +449,64 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
             (should-not (funcall ask "--git-dir"))))
       (magit-git2--release))))
 
+;;; Setup
+
+(ert-deftest magit-git2-test-no-module ()
+  "Without the module the mode stands, and calls go to git and just work."
+  :tags '(git2)
+  (let* ((dir (magit-git2-test--clean-repo))
+         (default-directory dir)
+         (head (string-trim (shell-command-to-string "git rev-parse HEAD"))))
+    (cl-letf (((symbol-function 'magit-git2-core-available-p) #'ignore))
+      (dolist (mode '(on shadow))
+        (let ((magit-git2-mode mode))
+          (should (equal (magit-git-string "rev-parse" "HEAD") head))
+          (should (eq magit-git2-mode mode)))))))
+
+(ert-deftest magit-git2-test-mode-default ()
+  "The default mode does not depend on the module, which may come later."
+  :tags '(git2)
+  (cl-letf (((symbol-function 'magit-git2-core-available-p) #'ignore))
+    (pcase-dolist (`(,type . ,mode) '((windows-nt . on) (gnu/linux . shadow)))
+      (let ((system-type type))
+        (should (eq (eval (car (get 'magit-git2-mode 'standard-value)) t)
+                    mode))))))
+
+(ert-deftest magit-git2-test-system-config ()
+  "The system config is set up once the module is there, by the environment."
+  :tags '(git2)
+  (let ((magit-git2--system-config-ok nil)
+        (magit-git2--initial-environment nil)
+        (from-git 0)
+        paths)
+    (cl-letf (((symbol-function 'magit-git2-set-system-config-from-git)
+               (lambda (&rest _) (cl-incf from-git)))
+              ((symbol-function 'magit-git2--set-system-config-path)
+               (lambda (dir) (push dir paths))))
+      (pcase-dolist (`(,type ,file ,ok ,times ,dirs)
+                     '((gnu/linux nil t 0 nil)
+                       (windows-nt nil t 1 nil)
+                       (windows-nt "/etc/gitconfig" t 0 ("/etc/"))
+                       (gnu/linux "/etc/other" nil 0 nil)))
+        (let ((system-type type)
+              (magit-git2--initial-environment
+               (list (cons "GIT_CONFIG_SYSTEM" file))))
+          (setq from-git 0 paths nil)
+          (magit-git2--init-system-config)
+          (should (eq (and magit-git2--system-config-ok t) ok))
+          (should (= from-git times))
+          (should (equal paths dirs)))))))
+
+(ert-deftest magit-git2-test-loaded-hook ()
+  "A module that arrives late makes the emulation usable."
+  :tags '(git2)
+  (should (memq #'magit-git2--init-system-config magit-git2-core-loaded-hook))
+  (let ((magit-git2--system-config-ok nil)
+        (default-directory (magit-git2-test--clean-repo)))
+    (should-not (magit-git2--usable-p nil))
+    (run-hooks 'magit-git2-core-loaded-hook)
+    (should (magit-git2--usable-p nil))))
+
 ;;; Download
 
 (defmacro magit-git2-test--with-release (&rest body)

@@ -3,6 +3,8 @@
 ;; Copyright (C) 2026 Kostafey <kostafey@gmail.com>
 
 ;; Author: Kostafey <kostafey@gmail.com>
+;; URL: https://github.com/kostafey/magit-git2
+;; Version: 0.1.0
 ;; Keywords: vc, tools
 ;; Package-Requires: ((emacs "29.1") (magit "4.0"))
 
@@ -27,8 +29,14 @@
 ;;
 ;; `magit-git2-mode' selects off, shadow (run git and the emulation and
 ;; record differences; Magit gets git's result) or on.
+;;
+;; All this comes with Magit: the autoloads load this file when Magit
+;; loads, and the module downloads if there is none (see
+;; magit-git2-core.el).
 
 ;;; Code:
+
+;;;###autoload (with-eval-after-load 'magit (require 'magit-git2))
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -70,9 +78,7 @@
 ;;; Options
 
 (defcustom magit-git2-mode
-  (cond ((not (magit-git2-core-available-p)) 'off)
-        ((eq system-type 'windows-nt) 'on)
-        (t 'shadow))
+  (if (eq system-type 'windows-nt) 'on 'shadow)
   "How the calls of `magit-process-git' are answered.
 
 off     Always run git.
@@ -82,8 +88,8 @@ on      Answer the calls the emulation understands in-process, run git
         for the rest.
 
 The default is on for Windows, where a process costs most, and shadow
-elsewhere; off when the module did not load.  An unexpected error in
-the emulation turns it off for the session."
+elsewhere.  Until the module is loaded, every call goes to git.  An
+unexpected error in the emulation turns it off for the session."
   :group 'magit-git2
   :type '(choice (const off) (const shadow) (const on)))
 
@@ -423,18 +429,8 @@ When git would see other values, emulation is off.")
                      (equal (getenv (car entry)) (cdr entry)))
                    magit-git2--initial-environment))))
 
-(defvar magit-git2--system-config-ok
-  (let ((file (cdr (assoc "GIT_CONFIG_SYSTEM"
-                          magit-git2--initial-environment))))
-    (or (null file)
-        (and (equal (file-name-nondirectory file) "gitconfig")
-             (magit-git2-core-available-p)
-             (progn (magit-git2--set-system-config-path
-                     (file-name-directory (expand-file-name file)))
-                    t))))
-  "Whether libgit2 reads the system config git reads.
-GIT_CONFIG_SYSTEM names a file; libgit2 searches directories for
-\"gitconfig\", so other file names cannot be matched.")
+(defvar magit-git2--system-config-ok nil
+  "Whether libgit2 reads the system config git reads.")
 
 (defun magit-git2-set-system-config-from-git (&optional executable)
   "Make libgit2 read the system config of Git for Windows EXECUTABLE.
@@ -454,6 +450,24 @@ look by default.  Return the directory used, or nil."
                      (expand-file-name "mingw64/etc" root))))
     (magit-git2--set-system-config-path dir)
     dir))
+
+(defun magit-git2--init-system-config ()
+  "Make the loaded module read the system config git reads.
+GIT_CONFIG_SYSTEM names a file; libgit2 searches directories for
+\"gitconfig\", so other file names cannot be matched."
+  (let ((file (cdr (assoc "GIT_CONFIG_SYSTEM"
+                          magit-git2--initial-environment))))
+    (setq magit-git2--system-config-ok
+          (cond ((null file)
+                 (when (eq system-type 'windows-nt)
+                   (magit-git2-set-system-config-from-git))
+                 t)
+                ((equal (file-name-nondirectory file) "gitconfig")
+                 (magit-git2--set-system-config-path
+                  (file-name-directory (expand-file-name file)))
+                 t)))))
+
+(add-hook 'magit-git2-core-loaded-hook #'magit-git2--init-system-config)
 
 ;;; Object names
 
@@ -1914,6 +1928,9 @@ Nil when git has to run."
 
 ;;; Commands
 
+;; Their autoloads name Magit, which loads this file and sets it up.
+
+;;;###autoload (autoload 'magit-git2-mode "magit" nil t)
 (defun magit-git2-mode (&optional mode)
   "Cycle `magit-git2-mode' through off, shadow and on, or set it to MODE."
   (interactive)
@@ -1930,11 +1947,13 @@ Nil when git has to run."
   (message "magit-git2: %s" magit-git2-mode)
   magit-git2-mode)
 
+;;;###autoload (autoload 'magit-git2-show-mismatches "magit" nil t)
 (defun magit-git2-show-mismatches ()
   "Show the differences shadow mode found."
   (interactive)
   (display-buffer (get-buffer-create magit-git2-mismatches-buffer)))
 
+;;;###autoload (autoload 'magit-git2-stats "magit" nil t)
 (defun magit-git2-stats ()
   "Show how many git calls were emulated, by command."
   (interactive)
@@ -1963,6 +1982,7 @@ Nil when git has to run."
              (funcall total 'emulated) (funcall total 'fell-through)
              (funcall total 'mismatched))))
 
+;;;###autoload (autoload 'magit-git2-reload-module "magit" nil t)
 (defun magit-git2-reload-module ()
   "Load the module again, after rebuilding it."
   (interactive)
@@ -1970,6 +1990,7 @@ Nil when git has to run."
       (message "magit-git2: loaded %s" magit-git2-core--loaded-file)
     (user-error "magit-git2: %s" magit-git2-core-error)))
 
+;;;###autoload (autoload 'magit-git2-download-module "magit" nil t)
 (defun magit-git2-download-module ()
   "Download the release build, after a download that failed."
   (interactive)
@@ -2001,6 +2022,9 @@ of its hook."
             (if after
                 (magit-add-section-hook hook section after t)
               (magit-add-section-hook hook section nil t))))))))
+
+(with-eval-after-load 'magit
+  (magit-git2-core-ensure))
 
 (provide 'magit-git2)
 
