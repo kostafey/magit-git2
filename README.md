@@ -118,11 +118,10 @@ names exact builds, and that commit is CI's: pull before the next push.
   `*magit-git2-mismatches*`. Magit always gets git's result.
 - `on`: answer what the emulation understands, run git for the rest.
 
-The default is `on` on Windows and `shadow` elsewhere; until the module is
-loaded, every call goes to git. An unexpected Lisp error in the emulation sets the
-mode to `off` for the session and is logged to `*magit-git2-log*`. A
-libgit2 error (signalled as `magit-git2-error`) only sends that one call
-to git.
+The default is `on`; until the module is loaded, every call goes to git. An
+unexpected Lisp error in the emulation sets the mode to `off` for the session
+and is logged to `*magit-git2-log*`. A libgit2 error (signalled as
+`magit-git2-error`) only sends that one call to git.
 
 Commands:
 

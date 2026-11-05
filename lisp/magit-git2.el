@@ -77,8 +77,7 @@
 
 ;;; Options
 
-(defcustom magit-git2-mode
-  (if (eq system-type 'windows-nt) 'on 'shadow)
+(defcustom magit-git2-mode 'on
   "How the calls of `magit-process-git' are answered.
 
 off     Always run git.
@@ -87,9 +86,8 @@ shadow  Run git, and also the emulation; record every difference in
 on      Answer the calls the emulation understands in-process, run git
         for the rest.
 
-The default is on for Windows, where a process costs most, and shadow
-elsewhere.  Until the module is loaded, every call goes to git.  An
-unexpected error in the emulation turns it off for the session."
+Until the module is loaded, every call goes to git.  An unexpected
+error in the emulation turns it off for the session."
   :group 'magit-git2
   :type '(choice (const off) (const shadow) (const on)))
 

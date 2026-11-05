@@ -463,15 +463,6 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
           (should (equal (magit-git-string "rev-parse" "HEAD") head))
           (should (eq magit-git2-mode mode)))))))
 
-(ert-deftest magit-git2-test-mode-default ()
-  "The default mode does not depend on the module, which may come later."
-  :tags '(git2)
-  (cl-letf (((symbol-function 'magit-git2-core-available-p) #'ignore))
-    (pcase-dolist (`(,type . ,mode) '((windows-nt . on) (gnu/linux . shadow)))
-      (let ((system-type type))
-        (should (eq (eval (car (get 'magit-git2-mode 'standard-value)) t)
-                    mode))))))
-
 (ert-deftest magit-git2-test-system-config ()
   "The system config is set up once the module is there, by the environment."
   :tags '(git2)
