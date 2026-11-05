@@ -174,19 +174,19 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
                   reports))))))
    (magit-git2-test--check "delivery" (nreverse reports))))
 
-(ert-deftest magit-git2-test-status-shadow ()
-  "Refreshing a status buffer in shadow mode records no mismatch."
+(ert-deftest magit-git2-test-status-verify ()
+  "Refreshing a status buffer in verify mode records no mismatch."
   :tags '(git2)
   (when-let* ((buffer (get-buffer magit-git2-mismatches-buffer)))
     (kill-buffer buffer))
-  (let ((magit-git2-mode 'shadow))
+  (let ((magit-git2-mode 'verify))
     (pcase-dolist (`(,state . ,dir) (magit-git2-test--dirs))
       (unless (member state '("main/sub" "origin.git"))
         (let ((default-directory dir))
           (magit-status-setup-buffer dir)
           (magit-refresh)))))
   (magit-git2-test--check
-   "status-shadow"
+   "status-verify"
    (when-let* ((b (get-buffer magit-git2-mismatches-buffer)))
      (with-current-buffer b (split-string (buffer-string) "^\\* " t)))))
 
@@ -285,9 +285,9 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
     (funcall run-in-refresh)
     (magit-git2-fixture--git dir "config" "--unset" "diff.autoRefreshIndex")
     (should-not (funcall stale-p))
-    ;; Shadow mode leaves all to git.
+    ;; Verify mode leaves all to git.
     (funcall touch)
-    (let ((magit-git2-mode 'shadow))
+    (let ((magit-git2-mode 'verify))
       (funcall run-in-refresh))
     (should-not (funcall stale-p))
     ;; A real refresh shows nothing false and leaves the index fresh.
@@ -418,8 +418,8 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
       (funcall check 'on function '("rev-parse" "--show-cdup")))
     (funcall check 'on 'magit-git2--deliver '("rev-parse" "--show-cdup"))
     (funcall check 'on 'magit-git2--take-ahead '("status" "--porcelain"))
-    (funcall check 'shadow 'magit-git2--usable-p '("rev-parse" "--show-cdup"))
-    (funcall check 'shadow 'magit-git2--count '("rev-parse" "--show-cdup"))))
+    (funcall check 'verify 'magit-git2--usable-p '("rev-parse" "--show-cdup"))
+    (funcall check 'verify 'magit-git2--count '("rev-parse" "--show-cdup"))))
 
 (ert-deftest magit-git2-test-printed-paths ()
   "Paths are printed as the module spells them, and only then."
@@ -449,6 +449,63 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
             (should-not (funcall ask "--git-dir"))))
       (magit-git2--release))))
 
+;;; Mismatch warnings
+
+(ert-deftest magit-git2-test-first-difference ()
+  "The first difference of the output is found, if there is one."
+  :tags '(git2)
+  (pcase-dolist (`(,git ,emulated ,difference)
+                 '(("a\nb\n" "a\nc\n" (2 "b" "c"))
+                   ("a\n" "a\nb\n" (2 "" "b"))
+                   ("a\nb" "a" (2 "b" nil))
+                   ("a\n" "a\n" nil)))
+    (should (equal (magit-git2--first-difference (list 0 git nil)
+                                                 (list 1 emulated nil))
+                   difference))))
+
+(ert-deftest magit-git2-test-mismatch-warning ()
+  "A mismatch warns once per shape, only after the refresh, and stays recorded."
+  :tags '(git2)
+  (let* ((dir (magit-git2-test--clean-repo))
+         (default-directory dir)
+         (magit-git2-mode 'verify)
+         (magit-git2--warned-shapes nil)
+         (magit-git2-mismatches-buffer " *magit-git2-test-mismatches*")
+         (settle (lambda ()
+                   (dotimes (_ 5) (accept-process-output nil 0.01))))
+         warnings)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (type text &rest _) (push (cons type text) warnings)))
+              ((symbol-function 'magit-git2--emulate)
+               (lambda (args _destination)
+                 (setq magit-git2--shape (intern (car args)))
+                 (list 0 (make-string 5000 ?x) nil))))
+      (unwind-protect
+          (progn
+            (magit-status-setup-buffer dir)
+            (magit-refresh)
+            (should-not warnings)
+            (funcall settle)
+            (let ((shapes (length magit-git2--warned-shapes)))
+              (should (> shapes 1))
+              (should (= (length warnings) shapes))
+              (magit-refresh)
+              (funcall settle)
+              (should (= (length warnings) shapes)))
+            (pcase-dolist (`(,type . ,text) warnings)
+              (should (eq type 'magit-git2))
+              (should (string-search "magit-git2-show-mismatches" text))
+              (should (< (length text) 300)))
+            (with-current-buffer magit-git2-mismatches-buffer
+              (should (string-search "first difference at line"
+                                     (buffer-string))))
+            (setq warnings nil magit-git2--warned-shapes nil)
+            (magit-git2--warn-mismatch '("config" "x") nil)
+            (funcall settle)
+            (should (string-search "exit code or stderr" (cdar warnings))))
+        (magit-git2--release)
+        (kill-buffer magit-git2-mismatches-buffer)))))
+
 ;;; Setup
 
 (ert-deftest magit-git2-test-no-module ()
@@ -458,7 +515,7 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
          (default-directory dir)
          (head (string-trim (shell-command-to-string "git rev-parse HEAD"))))
     (cl-letf (((symbol-function 'magit-git2-core-available-p) #'ignore))
-      (dolist (mode '(on shadow))
+      (dolist (mode '(on verify))
         (let ((magit-git2-mode mode))
           (should (equal (magit-git-string "rev-parse" "HEAD") head))
           (should (eq magit-git2-mode mode)))))))

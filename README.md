@@ -113,9 +113,11 @@ names exact builds, and that commit is CI's: pull before the next push.
 `magit-git2-mode` is one of:
 
 - `off`: always run git.
-- `shadow`: run git and also the emulation, compare the exit code and the
+- `verify`: run git and also the emulation, compare the exit code and the
   output byte for byte, and record every difference in
-  `*magit-git2-mismatches*`. Magit always gets git's result.
+  `*magit-git2-mismatches*`. The first difference of each shape in a session
+  also shows as a warning, once the refresh is over. Magit always gets git's
+  result.
 - `on`: answer what the emulation understands, run git for the rest.
 
 The default is `on`; until the module is loaded, every call goes to git. An
@@ -126,7 +128,7 @@ and is logged to `*magit-git2-log*`. A libgit2 error (signalled as
 Commands:
 
 - `magit-git2-mode` cycles the mode.
-- `magit-git2-show-mismatches` shows what shadow mode found.
+- `magit-git2-show-mismatches` shows what verify mode found.
 - `magit-git2-stats` shows per-command counters (emulated, fell through,
   mismatched, libgit2 errors, skipped, started ahead) and the number of
   auto-disables.
@@ -270,7 +272,7 @@ stdout and stderr must equal git's. The examples belong to the shape
 definitions (`:examples`, which `magit-git2-define-shape` requires), and a
 test fails for any shape that never answers. Two more tests compare
 Magit's own helpers with the emulation on and off, and refresh status
-buffers in shadow mode. Mismatches go to `MAGIT_GIT2_TEST_REPORT`.
+buffers in verify mode. Mismatches go to `MAGIT_GIT2_TEST_REPORT`.
 
 The download tests fetch a release from a `file://` URL with real `curl`.
 

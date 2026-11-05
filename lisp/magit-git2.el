@@ -27,8 +27,8 @@
 ;; A formatter that cannot be sure to match git refuses, and the call
 ;; falls through to git.
 ;;
-;; `magit-git2-mode' selects off, shadow (run git and the emulation and
-;; record differences; Magit gets git's result) or on.
+;; `magit-git2-mode' selects off, verify (run git and the emulation and
+;; report differences; Magit gets git's result) or on.
 ;;
 ;; All this comes with Magit: the autoloads load this file when Magit
 ;; loads, and the module downloads if there is none (see
@@ -78,18 +78,19 @@
   "How the calls of `magit-process-git' are answered.
 
 off     Always run git.
-shadow  Run git, and also the emulation; record every difference in
-        `magit-git2-mismatches-buffer'.  Magit always gets git's result.
+verify  Run git, and also the emulation; record every difference in
+        `magit-git2-mismatches-buffer' and warn of the first of each
+        shape.  Magit always gets git's result.
 on      Answer the calls the emulation understands in-process, run git
         for the rest.
 
 Until the module is loaded, every call goes to git.  An unexpected
 error in the emulation turns it off for the session."
   :group 'magit-git2
-  :type '(choice (const off) (const shadow) (const on)))
+  :type '(choice (const off) (const verify) (const on)))
 
 (defvar magit-git2-mismatches-buffer "*magit-git2-mismatches*"
-  "Buffer collecting the differences found in shadow mode.")
+  "Buffer collecting the differences found in verify mode.")
 
 (defvar magit-git2-log-buffer "*magit-git2-log*"
   "Buffer logging unexpected errors of the emulation.")
@@ -103,8 +104,8 @@ LIBGIT2-ERRORS SKIPPED AHEAD].")
 (defvar magit-git2--auto-disables 0
   "How often an unexpected error turned the emulation off.")
 
-(defvar magit-git2--mismatch-reported nil
-  "Whether this session already announced a mismatch.")
+(defvar magit-git2--warned-shapes nil
+  "The shapes this session already warned of a mismatch in.")
 
 (defconst magit-git2--stat-slots
   '((emulated . 0) (fell-through . 1) (mismatched . 2) (libgit2-error . 3)
@@ -1689,30 +1690,54 @@ stale stat data and writes the index back.  It does not with
        (insert out)))
     exit))
 
+(defun magit-git2--first-difference (expected actual)
+  "Where the stdout of EXPECTED and ACTUAL part, or nil if it does not.
+Both are (EXIT STDOUT STDERR); the result is (LINE-NUMBER LINE LINE)."
+  (let ((a (split-string (nth 1 expected) "\n"))
+        (b (split-string (nth 1 actual) "\n"))
+        (line 1))
+    (while (and a b (equal (car a) (car b)))
+      (setq a (cdr a) b (cdr b) line (1+ line)))
+    (when (or a b)
+      (list line (car a) (car b)))))
+
+(defun magit-git2--warn-mismatch (args difference)
+  "Warn that ARGS differ at DIFFERENCE, once per shape and session.
+A warning opens a window.  Mid-refresh that would show the half built
+buffer, so a timer shows it when Emacs is idle again."
+  (unless (memq magit-git2--shape magit-git2--warned-shapes)
+    (push magit-git2--shape magit-git2--warned-shapes)
+    (let ((clip (lambda (string)
+                  (and string
+                       (truncate-string-to-width string 60 nil nil t)))))
+      (run-with-timer
+       0 nil #'display-warning 'magit-git2
+       (format "git %s: %s; see M-x magit-git2-show-mismatches"
+               (funcall clip (mapconcat #'shell-quote-argument args " "))
+               (pcase difference
+                 (`(,line ,git ,emulated)
+                  (format "line %d is %S, the emulation gives %S" line
+                          (funcall clip git) (funcall clip emulated)))
+                 (_ "the exit code or stderr differs")))))))
+
 (defun magit-git2--record-mismatch (args expected actual)
   "Record that the emulation gave ACTUAL where git gave EXPECTED."
-  (with-current-buffer (get-buffer-create magit-git2-mismatches-buffer)
-    (goto-char (point-max))
-    (insert (format-time-string "* %F %T ")
-            (abbreviate-file-name default-directory) " $ git "
-            (mapconcat #'shell-quote-argument args " ") "\n"
-            (format "  shape: %s\n" magit-git2--shape)
-            (format "  git:      %S\n" expected)
-            (format "  emulated: %S\n" actual))
-    (let ((a (split-string (nth 1 expected) "\n"))
-          (b (split-string (nth 1 actual) "\n"))
-          (line 1))
-      (while (and a b (equal (car a) (car b)))
-        (setq a (cdr a) b (cdr b) line (1+ line)))
-      (when (or a b)
-        (insert (format "  first difference at line %d:\n  - %S\n  + %S\n"
-                        line (car a) (car b))))))
-  (unless magit-git2--mismatch-reported
-    (setq magit-git2--mismatch-reported t)
-    (message "magit-git2: the emulation differs from git, see %s"
-             magit-git2-mismatches-buffer)))
+  (let ((difference (magit-git2--first-difference expected actual)))
+    (with-current-buffer (get-buffer-create magit-git2-mismatches-buffer)
+      (goto-char (point-max))
+      (insert (format-time-string "* %F %T ")
+              (abbreviate-file-name default-directory) " $ git "
+              (mapconcat #'shell-quote-argument args " ") "\n"
+              (format "  shape: %s\n" magit-git2--shape)
+              (format "  git:      %S\n" expected)
+              (format "  emulated: %S\n" actual))
+      (pcase-let ((`(,line ,git ,emulated) difference))
+        (when difference
+          (insert (format "  first difference at line %d:\n  - %S\n  + %S\n"
+                          line git emulated)))))
+    (magit-git2--warn-mismatch args difference)))
 
-(defun magit-git2--shadow (orig destination args)
+(defun magit-git2--verify (orig destination args)
   "Call ORIG with DESTINATION and ARGS; compare with the emulation."
   (let* ((flat (flatten-tree args))
          (emulated (condition-case err
@@ -1906,7 +1931,7 @@ Nil when git has to run."
            (progn
              (magit-git2--count (or (car flat) "") 'fell-through)
              (apply orig destination args)))))
-    ('shadow (magit-git2--shadow orig destination args))
+    ('verify (magit-git2--verify orig destination args))
     (_ (apply orig destination args))))
 
 (advice-add 'magit-process-git :around #'magit-git2--around
@@ -1927,12 +1952,12 @@ Nil when git has to run."
 
 ;;;###autoload (autoload 'magit-git2-mode "magit" nil t)
 (defun magit-git2-mode (&optional mode)
-  "Cycle `magit-git2-mode' through off, shadow and on, or set it to MODE."
+  "Cycle `magit-git2-mode' through off, verify and on, or set it to MODE."
   (interactive)
   (setq magit-git2-mode
         (or mode (pcase magit-git2-mode
-                   ('off 'shadow)
-                   ('shadow 'on)
+                   ('off 'verify)
+                   ('verify 'on)
                    (_ 'off))))
   (when (and (not (eq magit-git2-mode 'off))
              (not (magit-git2-core-available-p)))
@@ -1944,7 +1969,7 @@ Nil when git has to run."
 
 ;;;###autoload (autoload 'magit-git2-show-mismatches "magit" nil t)
 (defun magit-git2-show-mismatches ()
-  "Show the differences shadow mode found."
+  "Show the differences verify mode found."
   (interactive)
   (display-buffer (get-buffer-create magit-git2-mismatches-buffer)))
 
