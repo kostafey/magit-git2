@@ -6,6 +6,7 @@
 //!   zig build                               vendored libgit2, host target
 //!   zig build -Dsystem-libgit2=true         system libgit2 via pkg-config
 //!   zig build -Dtarget=x86_64-windows-gnu   the Windows .dll
+//!   zig build -Dstrip=true                  without debug info
 //!   zig build test                          unit tests of the Zig helpers
 //!
 //! The module lands in zig-out/lib as magit-git2-core.so (.dll on
@@ -29,6 +30,11 @@ pub fn build(b: *std.Build) void {
         "system-libgit2",
         "Link the system libgit2 (pkg-config) instead of building it",
     ) orelse false;
+    const strip = b.option(
+        bool,
+        "strip",
+        "Leave the debug info out of the module",
+    );
 
     // C headers, translated: emacs-module.h as vendored, git2.h from
     // whichever libgit2 is linked.
@@ -67,6 +73,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
         .pic = true,
+        .strip = strip,
         .imports = &.{
             .{ .name = "emacs_c", .module = emacs_c.createModule() },
             .{ .name = "git2_c", .module = git2_c.createModule() },

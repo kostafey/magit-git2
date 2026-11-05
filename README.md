@@ -19,13 +19,15 @@ push, fetch, rebase) is untouched.
 build.zig, build.zig.zon     the module; libgit2 is a pinned dependency
 build/libgit2.zig            static libgit2 without network support
 build/libgit2-sources.zon    its source list
+build/publish-release.sh     CI: the release, and the pins of its builds
 src/main.zig                 module functions (data in, data out)
 src/git.zig                  repository cache, libgit2 errors, object ids
 src/path.zig                 directory paths as git prints them
 src/walk.zig                 git log's commit order
 src/emacs.zig                helpers over emacs_env
 vendor/emacs-module.h        from Emacs 31.1, unchanged
-lisp/magit-git2-core.el      loads the module
+lisp/magit-git2-core.el      loads the module, downloads the release build
+lisp/magit-git2-release.el   the pinned release, written by CI
 lisp/magit-git2.el           advice, dispatcher, formatters, modes
 test/                        fixture builder, differential ERT suite
 measure/                     the refresh cost measurement
@@ -41,6 +43,7 @@ through `translate-c`, because Zig 0.17 has no `@cImport`.
 zig build                              # zig-out/lib/magit-git2-core.so
 zig build -Dtarget=x86_64-windows-gnu  # zig-out/lib/magit-git2-core.dll
 zig build -Dsystem-libgit2=true        # link libgit2 found by pkg-config
+zig build -Dstrip=true                 # without debug info
 zig build test                         # unit tests of the Zig parts
 ```
 
@@ -62,12 +65,43 @@ the libgit2 tarball. zlib and pcre2 are compiled as libraries of their own,
 because on Windows zlib's `#include <process.h>` would otherwise find
 libgit2's `src/util/process.h`.
 
+## Release builds
+
+Building is optional. `magit-git2-core-ensure`, called when Magit loads,
+downloads the build for this system when there is no module file, and
+loads it. Which build is told from `system-type` and
+`system-configuration`: x86-64 Windows, or x86-64 Linux with glibc 2.28 or
+newer. Other systems stay with git unless they build the module.
+
+The download runs in the background with messages at its start and end, so
+Magit does not wait: it runs git until `magit-git2-core-loaded-hook` puts the
+module to use. It takes `curl`, as a process blocks Emacs neither on DNS nor
+on TLS; Windows has one since version 10, and it reads the Windows certificate
+store. If it fails, the message says why and Magit goes on with git. Then
+`M-x magit-git2-download-module` tries again. Where the network blocks it, get
+the file from the release page and set `magit-git2-core-file` to it.
+
+A build lands in `magit-git2-core-directory` (`~/.emacs.d/magit-git2/`) only
+if its SHA-256 is the one pinned in `lisp/magit-git2-release.el`, under a name
+with that hash: a new build goes beside a loaded one, which Windows would not
+let it replace. A module built here (`magit-git2-core-file`) has precedence
+and nothing is downloaded. `magit-git2-core-download` nil turns the download
+off.
+
+On master, when the sources of the module changed and the tests pass, CI
+publishes both builds as a GitHub release (artifacts of a run need a GitHub
+login) and commits the new `lisp/magit-git2-release.el`. So a Lisp commit
+names exact builds, and that commit is CI's: pull before the next push.
+
 ## Use
 
 ```elisp
 (add-to-list 'load-path ".../magit-git2/lisp/")
 (with-eval-after-load 'magit
-  (require 'magit-git2))
+  (require 'magit-git2)
+  (add-hook 'magit-git2-core-loaded-hook
+            (lambda () (setq magit-git2-mode 'on)))
+  (magit-git2-core-ensure))
 ```
 
 `magit-git2-mode` is one of:
@@ -93,6 +127,7 @@ Commands:
   auto-disables.
 - `magit-git2-reload-module` loads a rebuilt module, from a temporary copy,
   since Emacs never unloads a module.
+- `magit-git2-download-module` tries a failed download again.
 
 `(magit-git2-restore-sections)` puts back the status sections that cost
 too many processes on Windows: the tags header and the unpushed/unpulled
@@ -236,6 +271,8 @@ definitions (`:examples`, which `magit-git2-define-shape` requires), and a
 test fails for any shape that never answers. Two more tests compare
 Magit's own helpers with the emulation on and off, and refresh status
 buffers in shadow mode. Mismatches go to `MAGIT_GIT2_TEST_REPORT`.
+
+The download tests fetch a release from a `file://` URL with real `curl`.
 
 ## Measuring
 

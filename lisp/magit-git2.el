@@ -1970,6 +1970,13 @@ Nil when git has to run."
       (message "magit-git2: loaded %s" magit-git2-core--loaded-file)
     (user-error "magit-git2: %s" magit-git2-core-error)))
 
+(defun magit-git2-download-module ()
+  "Download the release build, after a download that failed."
+  (interactive)
+  (if (magit-git2-core-available-p)
+      (message "magit-git2: the module is loaded")
+    (magit-git2-core-ensure)))
+
 (defconst magit-git2--restored-sections
   '((magit-status-headers-hook magit-insert-tags-header)
     (magit-status-sections-hook

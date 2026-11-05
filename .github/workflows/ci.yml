@@ -50,11 +50,17 @@ jobs:
       - name: ERT, system libgit2, Ubuntu's Emacs
         run: EMACS=/usr/bin/emacs test/run-tests.sh
 
-      - name: Build with the vendored libgit2
-        run: zig build --summary all
+      # glibc 2.28 is what the release build asks of a Linux system.
+      - name: Build the release module, with the vendored libgit2
+        run: zig build -Dtarget=x86_64-linux-gnu.2.28 -Dstrip=true --summary all
 
       - name: ERT, vendored libgit2
         run: test/run-tests.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magit-git2-core-linux-x86_64
+          path: zig-out/lib/magit-git2-core.so
 
   # Apart from the tests: a failing test still leaves the .dll.
   windows-module:
@@ -68,10 +74,34 @@ jobs:
 
       - name: Cross-compile the Windows module
         run: |
-          zig build -Dtarget=x86_64-windows-gnu --summary all
+          zig build -Dtarget=x86_64-windows-gnu -Dstrip=true --summary all
           objdump -p zig-out/lib/magit-git2-core.dll | grep "DLL Name"
 
       - uses: actions/upload-artifact@v4
         with:
           name: magit-git2-core-windows-x86_64
           path: zig-out/lib/magit-git2-core.dll
+
+  # What magit-git2-core.el downloads: release assets, unlike artifacts,
+  # need no GitHub login.  The push of the pinned hashes starts no run,
+  # being made with this run's token.
+  release:
+    needs: [linux, windows-module]
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    concurrency: magit-git2-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/modules
+
+      - run: build/publish-release.sh "$RUNNER_TEMP/modules"
+        env:
+          GH_TOKEN: ${{ github.token }}

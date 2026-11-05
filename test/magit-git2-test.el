@@ -20,6 +20,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'ert-x)
 (require 'cl-lib)
 (require 'magit)
 (require 'magit-git2)
@@ -447,6 +448,156 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
           (cl-letf (((symbol-function 'magit-git2--final-path) nil))
             (should-not (funcall ask "--git-dir"))))
       (magit-git2--release))))
+
+;;; Download
+
+(defmacro magit-git2-test--with-release (&rest body)
+  "Run BODY with no module loaded or built, and a release to download.
+BODY sees the release's ASSET, the FILE the module downloads to, the
+files `module-load' got in LOADED and the hook's runs in RAN."
+  (declare (indent 0))
+  `(let* ((root (make-temp-file "magit-git2-release" t))
+          (platform (magit-git2-core--platform))
+          (asset (expand-file-name
+                  (format "t1/magit-git2-core-%s%s" platform
+                          module-file-suffix)
+                  root))
+          (magit-git2-core-file (expand-file-name "unbuilt" root))
+          (magit-git2-core-directory (expand-file-name "modules/" root))
+          (magit-git2-core-release-url (concat "file://" root))
+          (magit-git2-release-tag "t1")
+          (magit-git2-release-sha256
+           (list (cons platform (secure-hash 'sha256 "build"))))
+          (magit-git2-core-error "not loaded")
+          (magit-git2-core--download nil)
+          (file (magit-git2-core--released-file))
+          (loaded nil)
+          (ran 0)
+          (magit-git2-core-loaded-hook (list (lambda () (cl-incf ran)))))
+     (ignore file)
+     (make-directory (file-name-directory asset))
+     (write-region "build" nil asset nil 'silent)
+     (cl-letf (((symbol-function 'magit-git2-core-available-p)
+                (lambda () (and loaded t)))
+               ((symbol-function 'module-load)
+                (lambda (file) (push file loaded))))
+       (unwind-protect (progn ,@body)
+         (delete-directory root t)))))
+
+(defun magit-git2-test--await-download ()
+  "Wait until the download has been dealt with."
+  (with-timeout (10 (ert-fail "the download does not end"))
+    (while (buffer-live-p (process-buffer magit-git2-core--download))
+      (accept-process-output nil 0.01))))
+
+(defun magit-git2-test--downloaded ()
+  "The names of the files in the directory of the downloads."
+  (directory-files magit-git2-core-directory nil "\\`[^.]"))
+
+(ert-deftest magit-git2-test-download ()
+  "The release build lands beside no other, says so, and is put to use."
+  :tags '(git2)
+  (magit-git2-test--with-release
+    (make-directory magit-git2-core-directory)
+    (write-region "" nil (expand-file-name "magit-git2-core-0"
+                                           magit-git2-core-directory)
+                  nil 'silent)
+    (ert-with-message-capture messages
+      (magit-git2-core-ensure)
+      ;; Magit goes on meanwhile.
+      (should (= ran 0))
+      (should (string-search "downloading the module" messages))
+      (magit-git2-test--await-download)
+      (should (string-search "the module is ready" messages)))
+    (should (= ran 1))
+    (should (equal loaded (list file)))
+    (should-not magit-git2-core-error)
+    (should (equal (magit-git2-core--file-sha256 file)
+                   (secure-hash 'sha256 "build")))
+    (should (equal (magit-git2-test--downloaded)
+                   (list (file-name-nondirectory file))))))
+
+(ert-deftest magit-git2-test-download-refused ()
+  "A file with another hash is neither kept nor loaded."
+  :tags '(git2)
+  (magit-git2-test--with-release
+    (write-region "tampered" nil asset nil 'silent)
+    (ert-with-message-capture messages
+      (magit-git2-core-ensure)
+      (magit-git2-test--await-download)
+      (should (string-search "Magit runs git as usual" messages)))
+    (should (string-search "SHA-256" magit-git2-core-error))
+    (should-not loaded)
+    (should (= ran 0))
+    (should-not (magit-git2-test--downloaded))))
+
+(ert-deftest magit-git2-test-download-failed ()
+  "A failed download tells why and leaves nothing; a later try works."
+  :tags '(git2)
+  (magit-git2-test--with-release
+    (let ((build (expand-file-name "build" root)))
+      (rename-file asset build)
+      (magit-git2-core-ensure)
+      (magit-git2-test--await-download)
+      (should (string-search "curl:" magit-git2-core-error))
+      (should (string-search (magit-git2-core--url) magit-git2-core-error))
+      (should-not loaded)
+      (should-not (magit-git2-test--downloaded))
+      (rename-file build asset))
+    (magit-git2-core-ensure)
+    (magit-git2-test--await-download)
+    (should (equal loaded (list file)))
+    (should (= ran 1))))
+
+(ert-deftest magit-git2-test-no-download ()
+  "Nothing is downloaded with a module file at hand, or with no build."
+  :tags '(git2)
+  (magit-git2-test--with-release
+    (cl-flet ((file-only (lambda ()
+                           (magit-git2-core-load)
+                           (magit-git2-core-ensure)
+                           (should-not magit-git2-core--download)
+                           (should (= (length loaded) 1))
+                           (prog1 (car loaded) (setq loaded nil ran 0)))))
+      (make-directory magit-git2-core-directory)
+      (write-region "" nil file nil 'silent)
+      (should (equal (file-only) file))
+      ;; The local build goes first.
+      (write-region "" nil magit-git2-core-file nil 'silent)
+      (should (equal (file-only) magit-git2-core-file))
+      (delete-file magit-git2-core-file)
+      ;; Downloaded anew, a file that does not load would not load either.
+      (cl-letf (((symbol-function 'module-load)
+                 (lambda (_) (error "Too old a glibc"))))
+        (magit-git2-core-load)
+        (magit-git2-core-ensure)
+        (should-not magit-git2-core--download)
+        (should (string-search "glibc" magit-git2-core-error)))
+      (delete-file file))
+    (let ((magit-git2-core-download nil))
+      (magit-git2-core-ensure)
+      (should-not magit-git2-core--download))
+    (let ((magit-git2-release-sha256 nil))
+      (magit-git2-core-ensure)
+      (should-not magit-git2-core--download))
+    (cl-letf (((symbol-function 'executable-find) #'ignore))
+      (magit-git2-core-ensure)
+      (should-not magit-git2-core--download)
+      (should (string-search "no curl" magit-git2-core-error)))))
+
+(ert-deftest magit-git2-test-platform ()
+  "The system picks the release build, and only a build that runs on it."
+  :tags '(git2)
+  (pcase-dolist (`(,type ,configuration ,platform)
+                 '((windows-nt "x86_64-w64-mingw32" "windows-x86_64")
+                   (gnu/linux "x86_64-pc-linux-gnu" "linux-x86_64")
+                   (gnu/linux "x86_64-suse-linux" "linux-x86_64")
+                   (gnu/linux "x86_64-alpine-linux-musl" nil)
+                   (gnu/linux "aarch64-unknown-linux-gnu" nil)
+                   (darwin "x86_64-apple-darwin23.6.0" nil)))
+    (let ((system-type type)
+          (system-configuration configuration))
+      (should (equal (magit-git2-core--platform) platform)))))
 
 (provide 'magit-git2-test)
 
