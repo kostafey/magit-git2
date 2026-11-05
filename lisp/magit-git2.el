@@ -63,7 +63,6 @@
 (declare-function magit-git2--log "magit-git2-core")
 (declare-function magit-git2--commits "magit-git2-core")
 (declare-function magit-git2--reflog "magit-git2-core")
-(declare-function magit-add-section-hook "magit-section")
 (declare-function magit-git-executable "magit-git")
 (declare-function magit-process-git-arguments "magit-git")
 (declare-function magit-process-environment "magit-process")
@@ -72,8 +71,6 @@
 (defvar magit-git-environment)
 (defvar magit-git-executable)
 (defvar magit--refresh-cache)
-(defvar magit-status-sections-hook)
-(defvar magit-status-headers-hook)
 
 ;;; Options
 
@@ -1995,31 +1992,6 @@ Nil when git has to run."
   (if (magit-git2-core-available-p)
       (message "magit-git2: the module is loaded")
     (magit-git2-core-ensure)))
-
-(defconst magit-git2--restored-sections
-  '((magit-status-headers-hook magit-insert-tags-header)
-    (magit-status-sections-hook
-     magit-insert-unpushed-to-pushremote
-     magit-insert-unpushed-to-upstream-or-recent
-     magit-insert-unpulled-from-pushremote
-     magit-insert-unpulled-from-upstream))
-  "Sections too costly in git processes on Windows, cheap with the module.")
-
-(defun magit-git2-restore-sections ()
-  "Put the sections of `magit-git2--restored-sections' back.
-Each goes after the section that precedes it in the standard value
-of its hook."
-  (require 'magit-status)
-  (pcase-dolist (`(,hook . ,sections) magit-git2--restored-sections)
-    (let ((standard (eval (car (get hook 'standard-value)) t)))
-      (dolist (section sections)
-        (unless (memq section (symbol-value hook))
-          ;; The nearest section before it that the hook still has.
-          (let ((after (cl-loop for s in (cdr (memq section (reverse standard)))
-                                when (memq s (symbol-value hook)) return s)))
-            (if after
-                (magit-add-section-hook hook section after t)
-              (magit-add-section-hook hook section nil t))))))))
 
 (with-eval-after-load 'magit
   (magit-git2-core-ensure))

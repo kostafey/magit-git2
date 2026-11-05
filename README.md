@@ -134,12 +134,6 @@ Commands:
   since Emacs never unloads a module.
 - `magit-git2-download-module` tries a failed download again.
 
-`(magit-git2-restore-sections)` puts back the status sections that cost
-too many processes on Windows: the tags header and the unpushed/unpulled
-sections for upstream and push-remote. Each goes after its neighbour in
-the hook's standard value. With the module on they are answered
-in-process.
-
 On Windows, `magit-git2-set-system-config-from-git` runs once the module is
 loaded and points libgit2 at the system config of Git for Windows
 (`<root>/etc/gitconfig`, or `<root>/mingw64/etc/gitconfig`), which libgit2
