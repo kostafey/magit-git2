@@ -2,6 +2,9 @@
 
 ;; Copyright (C) 2026 Kostafey <kostafey@gmail.com>
 
+;; Author: Kostafey <kostafey@gmail.com>
+;; Assisted-by: Claude:claude-opus-5-5
+
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 2 of the License, or

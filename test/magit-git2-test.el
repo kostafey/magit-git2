@@ -520,6 +520,25 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
           (should (equal (magit-git-string "rev-parse" "HEAD") head))
           (should (eq magit-git2-mode mode)))))))
 
+(ert-deftest magit-git2-test-mode-off-start ()
+  "Mode off at load fetches nothing; leaving it starts the module, once."
+  :tags '(git2)
+  (let ((magit-git2-mode 'off)
+        (magit-git2--started nil)
+        (ensured 0))
+    (cl-letf (((symbol-function 'magit-git2-core-ensure)
+               (lambda () (cl-incf ensured)))
+              ((symbol-function 'magit-git2-core-available-p) #'ignore))
+      (ert-with-message-capture _messages
+        (magit-git2--start)
+        (should (= ensured 0))
+        (should (eq (magit-git2-mode 'verify) 'verify))
+        (should (= ensured 1))
+        (magit-git2-mode 'on)
+        (magit-git2-mode 'off)
+        (should (eq (magit-git2-mode) 'verify))
+        (should (= ensured 1))))))
+
 (ert-deftest magit-git2-test-system-config ()
   "The system config is set up once the module is there, by the environment."
   :tags '(git2)

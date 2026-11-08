@@ -49,7 +49,17 @@ write_pins() {
     cat > "$pins" <<PINS
 ;;; magit-git2-release.el --- The released module builds  -*- lexical-binding: t -*-
 
+;; Copyright (C) 2026 Kostafey <kostafey@gmail.com>
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 2 of the License, or
+;; (at your option) any later version.
+
+;;; Commentary:
+
 ;; This file is written by build/publish-release.sh.  Do not edit it.
+;; magit-git2-core.el checks a download against these hashes.
 
 ;;; Code:
 

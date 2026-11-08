@@ -110,7 +110,8 @@ A release build lands there only if its SHA-256 is the one pinned in
 `lisp/magit-git2-release.el`, under a name with that hash: a new build goes
 beside a loaded one, which Windows would not let it replace. A
 `magit-git2-core.so` there has precedence and nothing is downloaded.
-`magit-git2-core-download` nil turns the download off.
+`magit-git2-core-download` nil turns the download off, and so does
+`magit-git2-mode` set to `off` before Magit loads (see [Use](#use)).
 
 On master, when the sources of the module changed and the tests pass, CI
 publishes both builds as a GitHub release (artifacts of a run need a GitHub
@@ -129,8 +130,9 @@ names exact builds, and that commit is CI's: pull before the next push.
   result.
 - `on`: answer what the emulation understands, run git for the rest.
 
-The default is `on`; until the module is loaded, every call goes to git. An
-unexpected Lisp error in the emulation sets the mode to `off` for the session
+The default is `on`; until the module is loaded, every call goes to git.
+`off` set before Magit loads means no download either, until
+`M-x magit-git2-mode` changes the mode. An unexpected Lisp error in the emulation sets the mode to `off` for the session
 and is logged to `*magit-git2-log*`. A libgit2 error (signalled as
 `magit-git2-error`) only sends that one call to git.
 

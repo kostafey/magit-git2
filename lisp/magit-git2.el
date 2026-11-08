@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Kostafey <kostafey@gmail.com>
 
 ;; Author: Kostafey <kostafey@gmail.com>
+;; Assisted-by: Claude:claude-opus-5-5
 ;; URL: https://github.com/kostafey/magit-git2
 ;; Version: 0.1.0
 ;; Keywords: vc, tools
@@ -84,8 +85,10 @@ verify  Run git, and also the emulation; record every difference in
 on      Answer the calls the emulation understands in-process, run git
         for the rest.
 
-Until the module is loaded, every call goes to git.  An unexpected
-error in the emulation turns it off for the session."
+Until the module is loaded, every call goes to git.  Off when this
+package loads also means no download, until the command
+`magit-git2-mode' changes the mode.  An unexpected error in the
+emulation turns it off for the session."
   :group 'magit-git2
   :type '(choice (const off) (const verify) (const on)))
 
@@ -98,8 +101,9 @@ error in the emulation turns it off for the session."
 ;;; Statistics
 
 (defvar magit-git2--stats (make-hash-table :test #'equal)
-  "Per-command counters: COMMAND -> [EMULATED FELL-THROUGH MISMATCHED
-LIBGIT2-ERRORS SKIPPED AHEAD].")
+  "Per-command counters.
+Each command maps to [EMULATED FELL-THROUGH MISMATCHED LIBGIT2-ERRORS
+SKIPPED AHEAD].")
 
 (defvar magit-git2--auto-disables 0
   "How often an unexpected error turned the emulation off.")
@@ -146,7 +150,7 @@ for the differential test.")
           (nconc magit-git2--shapes (list (list name doc matcher examples))))))
 
 (defmacro magit-git2-define-shape (name pattern docstring &rest body)
-  "Define the emulated argument shape NAME.
+  "Define the emulated argument shape NAME, documented by DOCSTRING.
 PATTERN is a `pcase' pattern for the local git arguments; patterns
 must not overlap, as a refusal ends the dispatch.  BODY
 returns (EXIT STDOUT STDERR), where STDERR is `unknown' when only the
@@ -276,8 +280,9 @@ Refuse when that cannot be told, or the module is too old to tell."
       (string-remove-suffix "/" path))))
 
 (defun magit-git2--location ()
-  "Where the current directory is: one of `outside', `gitdir' (inside
-the git directory), `bare' or (worktree TOP DEPTH)."
+  "Where the current directory lies in its repository.
+One of `outside', `gitdir' (inside the git directory), `bare' or
+`(worktree TOP DEPTH)'."
   (magit-git2--memoize 'location
     (let ((info (magit-git2--info))
           (cwd (magit-git2--cwd)))
@@ -321,9 +326,9 @@ the git directory), `bare' or (worktree TOP DEPTH)."
 
 (defun magit-git2--canonical-key (key)
   "KEY with section and name downcased, or refuse."
-  (if (string-match (rx bos (group (+ (any alnum "-"))) "."
+  (if (string-match (rx bos (group (+ (in alnum "-"))) "."
                          (? (group (+ anything)) ".")
-                         (group alpha (* (any alnum "-"))) eos)
+                         (group alpha (* (in alnum "-"))) eos)
                      key)
       (concat (downcase (match-string 1 key)) "."
               (if (match-string 2 key) (concat (match-string 2 key) ".") "")
@@ -430,10 +435,13 @@ When git would see other values, emulation is off.")
 
 (defun magit-git2-set-system-config-from-git (&optional executable)
   "Make libgit2 read the system config of Git for Windows EXECUTABLE.
-EXECUTABLE defaults to `magit-git-executable'.  Git for Windows keeps
+EXECUTABLE defaults to `magit-git-executable', or to git before Magit
+has loaded.  Git for Windows keeps
 the system config under its install root, where libgit2 does not
 look by default.  Return the directory used, or nil."
-  (when-let* ((exe (executable-find (or executable magit-git-executable)))
+  (when-let* ((exe (executable-find (or executable
+                                        (bound-and-true-p magit-git-executable)
+                                        "git")))
               (root (locate-dominating-file
                      exe (lambda (dir)
                            (or (file-exists-p
@@ -514,8 +522,8 @@ left."
 
 (defconst magit-git2--rev-regexp
   (rx bos
-      (group (? (any "A-Za-z0-9_./+") (* (any "A-Za-z0-9_./+-"))))
-      (? (group "@{" (or (any "uU") (regexp "[uU][pP][sS][tT][rR][eE][aA][mM]"))
+      (group (? (in "A-Za-z0-9_./+") (* (in "A-Za-z0-9_./+-"))))
+      (? (group "@{" (or (in "uU") (regexp "[uU][pP][sS][tT][rR][eE][aA][mM]"))
                 "}"))
       (group (* (or (seq "~" (* digit)) (seq "^" (* digit))
                     "^{commit}" "^{tree}" "^{}")))
@@ -601,8 +609,8 @@ Refuse syntax outside `magit-git2--rev-regexp' and ambiguous names."
                      0)))
 
 (defun magit-git2--midx (file)
-  "(COUNT . PACK-INDEX-NAMES) of the multi-pack-index FILE; refuse what
-is not a single version 1 or 2 SHA-1 index."
+  "Read the multi-pack-index FILE as (COUNT . PACK-INDEX-NAMES).
+Refuse what is not a single version 1 or 2 SHA-1 index."
   (let* ((header (magit-git2--read-bytes file 0 12))
          (chunks (aref header 6))
          (table (magit-git2--read-bytes file 12 (* 12 (1+ chunks))))
@@ -852,7 +860,8 @@ is not a single version 1 or 2 SHA-1 index."
                collect value))))
 
 (defun magit-git2--config-line (name value z)
-  "One entry of `git config --list', NUL-terminated if Z."
+  "One entry of `git config --list' for NAME and VALUE.
+With Z, as `--null' prints it: a newline before VALUE, a NUL at the end."
   (concat name (and value (concat (if z "\n" "=") value)) (if z "\0" "\n")))
 
 (magit-git2-define-shape config-list
@@ -1334,7 +1343,9 @@ exactly one tag, pointing at the commit itself."
       table)))
 
 (defun magit-git2--format-decorations (hash full prefix suffix)
-  "The decorations of HASH as git's format_decorations prints them."
+  "The decorations of HASH as git's format_decorations prints them.
+FULL keeps the refs/ prefixes of the names.  PREFIX and SUFFIX go
+around a result that is not empty."
   (let* ((decos (gethash hash (magit-git2--decorations)))
          (symref (plist-get (magit-git2--head-info) :symref))
          (current (and (assq 'head decos) symref
@@ -1721,7 +1732,7 @@ buffer, so a timer shows it when Emacs is idle again."
                  (_ "the exit code or stderr differs")))))))
 
 (defun magit-git2--record-mismatch (args expected actual)
-  "Record that the emulation gave ACTUAL where git gave EXPECTED."
+  "Record that for ARGS the emulation gave ACTUAL where git gave EXPECTED."
   (let ((difference (magit-git2--first-difference expected actual)))
     (with-current-buffer (get-buffer-create magit-git2-mismatches-buffer)
       (goto-char (point-max))
@@ -1937,14 +1948,22 @@ Nil when git has to run."
 (advice-add 'magit-process-git :around #'magit-git2--around
             '((name . magit-git2)))
 
-(with-eval-after-load 'magit-mode
-  (add-hook 'magit-unwind-refresh-hook #'magit-git2--release-if-loaded)
-  (add-hook 'magit-unwind-refresh-hook #'magit-git2--drop-ahead))
+(add-hook 'magit-unwind-refresh-hook #'magit-git2--release-if-loaded)
+(add-hook 'magit-unwind-refresh-hook #'magit-git2--drop-ahead)
 
 (defun magit-git2--release-if-loaded ()
   "Free the module's repository handles, if the module is loaded."
   (when (magit-git2-core-available-p)
     (magit-git2--release)))
+
+(defvar magit-git2--started nil
+  "Whether this session has put the module to use or begun to fetch it.")
+
+(defun magit-git2--start ()
+  "Put the module to use, downloading it if need be, unless the mode is off."
+  (unless (or magit-git2--started (eq magit-git2-mode 'off))
+    (setq magit-git2--started t)
+    (magit-git2-core-ensure)))
 
 ;;; Commands
 
@@ -1952,19 +1971,17 @@ Nil when git has to run."
 
 ;;;###autoload (autoload 'magit-git2-mode "magit" nil t)
 (defun magit-git2-mode (&optional mode)
-  "Cycle `magit-git2-mode' through off, verify and on, or set it to MODE."
+  "Cycle `magit-git2-mode' through off, verify and on, or set it to MODE.
+Leaving off for the first time puts the module to use, downloading it
+if there is none."
   (interactive)
   (setq magit-git2-mode
         (or mode (pcase magit-git2-mode
                    ('off 'verify)
                    ('verify 'on)
                    (_ 'off))))
-  (when (and (not (eq magit-git2-mode 'off))
-             (not (magit-git2-core-available-p)))
-    (setq magit-git2-mode 'off)
-    (user-error "magit-git2: the module is not loaded: %s"
-                magit-git2-core-error))
   (message "magit-git2: %s" magit-git2-mode)
+  (magit-git2--start)
   magit-git2-mode)
 
 ;;;###autoload (autoload 'magit-git2-show-mismatches "magit" nil t)
@@ -2018,8 +2035,7 @@ Nil when git has to run."
       (message "magit-git2: the module is loaded")
     (magit-git2-core-ensure)))
 
-(with-eval-after-load 'magit
-  (magit-git2-core-ensure))
+(magit-git2--start)
 
 (provide 'magit-git2)
 
