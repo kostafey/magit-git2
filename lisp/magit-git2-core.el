@@ -179,7 +179,7 @@ git until it is ready" (magit-git2-core--platform))
                :noquery t
                :command (list "curl" "--fail" "--silent" "--show-error"
                               "--location" "--connect-timeout" "30"
-                              "--max-time" "300"
+                              "--max-time" "300" "--ssl-revoke-best-effort"
                               "--output" (file-name-nondirectory part) url)
                :sentinel
                (lambda (process _event)
