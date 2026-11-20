@@ -252,7 +252,7 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
          (dir default-directory)
          (magit-git2-mode 'on)
          ;; Started ahead, they would refresh the index themselves.
-         (magit-git2--ahead-commands nil)
+         (magit-git2-ahead-processes 0)
          ;; git compares whole seconds of the modification time.
          (shift 0)
          (touch (lambda ()
@@ -398,21 +398,84 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
   (let* ((dir (magit-git2-test--clean-repo))
          (default-directory dir)
          (magit-git2-mode 'on)
-         (command (cons magit-git-global-arguments '("diff" "--stat")))
-         (magit-git2--ahead-commands (list command))
+         (command (cons dir (cons magit-git-global-arguments
+                                  '("diff" "--stat"))))
+         (magit-git2--ahead-state 'pending)
+         (magit-git2--ahead-queue (list command))
          (magit-git2--ahead-processes nil)
+         (magit-git2--ahead-asked nil)
          (magit--refreshing-buffer-p t)
          (magit--refresh-start-time (current-time)))
     (should (equal (magit-process-git nil '("update-index" "--refresh")) 0))
     (should (= (length magit-git2--ahead-processes) 1))
-    ;; Its output belongs to this refresh and no other.
-    (let ((magit--refresh-start-time (current-time)))
-      (should-not (magit-git2--take-ahead '("diff" "--stat"))))
     (magit-git2--drop-ahead)
     (should-not magit-git2--ahead-processes)
-    (should-not magit-git2--ahead-commands)
+    (should-not magit-git2--ahead-asked)
     (magit-git2-test--settle)
     (should-not (file-exists-p ".git/index.lock"))))
+
+(defvar magit-git2-test--directories nil
+  "The repositories a `magit-git2-test-mode' buffer shows.")
+
+(defvar magit-git2-test--waiting nil
+  "How many commands started ahead waited, after each git call.")
+
+(define-derived-mode magit-git2-test-mode magit-mode "Test"
+  "A Magit buffer over the repositories `magit-git2-test--directories'.")
+
+(defun magit-git2-test-refresh-buffer ()
+  "Insert the status and the diff of each repository, as git prints them."
+  (magit-insert-section (magit-git2-test)
+    (dolist (dir magit-git2-test--directories)
+      (let ((default-directory dir))
+        (dolist (args '(("status" "--porcelain") ("diff")))
+          (insert (apply #'magit-git-output args) "
+")
+          (push (length magit-git2--ahead-processes)
+                magit-git2-test--waiting))))))
+
+(ert-deftest magit-git2-test-ahead-directories ()
+  "A buffer over several repositories gets their commands started ahead.
+In their own directories, and no more at a time than allowed."
+  :tags '(git2)
+  (let* ((magit-git2-test--directories
+          (list (magit-git2-test--clean-repo)
+                (magit-git2-test--clean-repo)
+                (magit-git2-test--clean-repo)))
+         (magit-git2-ahead-processes 2)
+         (buffer (generate-new-buffer "*magit-git2-test*"))
+         (refresh (lambda ()
+                    (with-current-buffer buffer
+                      (magit-refresh-buffer)
+                      (buffer-substring-no-properties
+                       (point-min) (point-max))))))
+    (unwind-protect
+        (progn
+          (cl-loop for dir in magit-git2-test--directories
+                   for i from 1
+                   do (magit-git2-fixture--write
+                       (expand-file-name (format "new-%d" i) dir) "new
+")
+                   (magit-git2-fixture--write
+                    (expand-file-name "file" dir) (format "change %d
+" i)))
+          (with-current-buffer buffer
+            (magit-git2-test-mode))
+          (let* ((serial (let ((magit-git2-mode 'off)) (funcall refresh)))
+                 (magit-git2-mode 'on)
+                 (first (funcall refresh))
+                 (before (magit-git2-test--ahead-count))
+                 (magit-git2-test--waiting nil)
+                 (ahead (funcall refresh)))
+            (should (equal first serial))
+            (should (equal ahead serial))
+            (should (= (length (buffer-local-value
+                                'magit-git2--ahead-commands buffer))
+                       6))
+            (should (= (- (magit-git2-test--ahead-count) before) 6))
+            (should (<= (apply #'max magit-git2-test--waiting) 2))))
+      (kill-buffer buffer)
+      (magit-git2-test--settle))))
 
 (ert-deftest magit-git2-test-lisp-error ()
   "A Lisp error turns the emulation off and git answers."
@@ -424,7 +487,6 @@ Return (MISMATCHES . ANSWERED), ANSWERED the shapes that answered."
                    (magit-git2--auto-disables 0)
                    (magit--refreshing-buffer-p t)
                    (magit--refresh-start-time (current-time))
-                   (magit-git2--status-refresh magit--refresh-start-time)
                    (theirs (magit-git2-test--git args))
                    (mine (cl-letf (((symbol-function function)
                                     (lambda (&rest _) (error "Failure"))))

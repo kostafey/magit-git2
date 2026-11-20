@@ -11,7 +11,9 @@ Every synchronous git call of Magit goes through `magit-process-git`. An
 looks at the local arguments. If they have a registered *shape*, the
 shape's formatter answers. Every other call, and every call a formatter is
 not sure about, goes to git exactly as before. Asynchronous git (commit,
-push, fetch, rebase) is untouched.
+push, fetch, rebase) is untouched. A second advice, on
+`magit-refresh-buffer`, only marks where a buffer's refresh begins and ends
+(see [Use](#use)).
 
 On Windows this took a status refresh from 4.28 s to 0.37 s on one real
 repository. On Linux, where a process is cheap, the gain is small.
@@ -168,13 +170,18 @@ In mode `on` a status refresh also does without its first command,
 the same refresh looks past stale stat data and writes the index back. Git
 does run it with `--no-optional-locks` or with `diff.autoRefreshIndex` off.
 
-What such a refresh still needs of git is `status` and two `diff` commands,
-nearly all of it process start-up, and Magit waits for one after the other.
-So the refresh starts the `status` and `diff` commands of the previous one
-all at once, with the same arguments, and takes their output when Magit asks
-for it. A command Magit does not ask for runs to its end, since killed git
-could leave `index.lock` behind. One that was not started runs as usual and
-starts ahead next time.
+What a refresh still needs of git is `status` and `diff` commands, nearly
+all of it process start-up, and Magit waits for one after the other: three
+for a status buffer, a few per repository for a buffer that shows several,
+such as that of multi-magit. So in mode `on` the refresh of a buffer starts
+the `status` and `diff` commands of its previous refresh, with the same
+arguments and in the same directories, and takes their output when Magit
+asks for it. They start at the first git call of the refresh, or after an
+`update-index --refresh` that runs, and at most `magit-git2-ahead-processes`
+(8) wait at a time: each one Magit takes starts the next. A command Magit
+does not ask for runs to its end, since killed git could leave `index.lock`
+behind. One that was not started runs as usual and starts ahead next time.
+`magit-git2-ahead-processes` 0 starts none.
 
 ## What is emulated
 

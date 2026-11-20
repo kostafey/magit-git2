@@ -1792,21 +1792,40 @@ buffer, so a timer shows it when Emacs is idle again."
 
 ;;; Commands started ahead
 
-;; What a status refresh still needs of git takes three processes, nearly
-;; all of it their start-up, and Magit waits for one after the other.
-;; The commands rarely change, so a refresh starts those of the last one
-;; all at once and takes their output when Magit asks for it.
+;; What a refresh still needs of git is `status' and `diff', nearly all of
+;; it process start-up, and Magit waits for one after the other.  A buffer
+;; showing several repositories needs a few of them per repository.  The
+;; commands rarely change from one refresh of a buffer to the next, so a
+;; refresh starts those of the last one, a few at a time, and takes their
+;; output when Magit asks for it.
 
-(defvar magit-git2--ahead-commands nil
-  "The `status' and `diff' commands of the last status refresh.
-A list of (GLOBAL-ARGS . LOCAL-ARGS).")
+(defcustom magit-git2-ahead-processes 8
+  "How many git commands a refresh runs ahead of Magit at a time.
+Each takes two subprocesses of Emacs, for its stdout and stderr.
+0 starts none."
+  :group 'magit-git2
+  :type 'natnum)
+
+(defvar-local magit-git2--ahead-commands nil
+  "The `status' and `diff' commands of the last refresh of this buffer.
+A list of (DIRECTORY GLOBAL-ARGS . LOCAL-ARGS), in the order Magit
+asked for them.")
+
+(defvar magit-git2--ahead-state nil
+  "Where the refresh in progress is with its commands started ahead.
+Nil outside a refresh, `pending' until the first call of git in it,
+`started' after.  `magit-git2--around-refresh' binds this and the
+other variables of the refresh.")
+
+(defvar magit-git2--ahead-queue nil
+  "The commands of the last refresh not started yet, in its order.")
 
 (defvar magit-git2--ahead-processes nil
-  "The commands running ahead of Magit: ((KEY . PROCESS) ...).
-KEY is (DIRECTORY GLOBAL-ARGS . LOCAL-ARGS).")
+  "The commands running ahead of Magit: ((COMMAND . PROCESS) ...).
+COMMAND is (DIRECTORY GLOBAL-ARGS . LOCAL-ARGS).")
 
-(defvar magit-git2--status-refresh nil
-  "The `magit--refresh-start-time' of the latest status refresh.")
+(defvar magit-git2--ahead-asked nil
+  "The commands this refresh asked for, the last one first.")
 
 (defvar magit-git2--finished-processes nil
   "The processes `magit-git2--free-finished' is to free.")
@@ -1891,39 +1910,77 @@ They run to their end: killed, git could leave `index.lock' behind."
     (if (process-live-p process)
         (set-process-sentinel process #'magit-git2--reap)
       (magit-git2--free-later process)))
-  (setq magit-git2--ahead-processes nil))
+  (setq magit-git2--ahead-processes nil
+        magit-git2--ahead-queue nil))
+
+(defun magit-git2--fill-ahead ()
+  "Start queued commands while fewer than `magit-git2-ahead-processes'
+wait to be taken.  A command that cannot start runs when Magit asks."
+  (while (and magit-git2--ahead-queue
+              (< (length magit-git2--ahead-processes)
+                 magit-git2-ahead-processes))
+    (let* ((command (pop magit-git2--ahead-queue))
+           (process (condition-case nil
+                        (let ((default-directory (car command)))
+                          (magit-git2--start-process (cdr command)))
+                      (error nil))))
+      (when process
+        (push (cons command process) magit-git2--ahead-processes)))))
 
 (defun magit-git2--start-ahead ()
-  "Start the commands of the last status refresh."
-  (magit-git2--drop-ahead)
-  (setq magit-git2--status-refresh
-        (bound-and-true-p magit--refresh-start-time))
-  (let ((cwd (magit-git2--cwd)))
-    (dolist (command (prog1 magit-git2--ahead-commands
-                       (setq magit-git2--ahead-commands nil)))
-      (push (cons (cons cwd command) (magit-git2--start-process command))
-            magit-git2--ahead-processes))))
+  "Start the commands of the buffer's last refresh, at the first call.
+Not before an `update-index --refresh' that runs: they would contend
+with it for the index."
+  (when (eq magit-git2--ahead-state 'pending)
+    (setq magit-git2--ahead-state 'started)
+    (magit-git2--fill-ahead)))
 
 (defun magit-git2--take-ahead (args)
   "The (EXIT STDOUT STDERR) of the local ARGS started ahead, or nil.
-In a status refresh, also remember ARGS for the next one."
-  (when (and magit-git2--status-refresh
-             (eq magit-git2--status-refresh
-                 (bound-and-true-p magit--refresh-start-time))
+In a refresh, also remember ARGS for the next one."
+  (when (and magit-git2--ahead-state
              (member (car args) '("status" "diff")))
-    (let* ((command (cons magit-git-global-arguments args))
-           (entry (assoc (cons (magit-git2--cwd) command)
-                         magit-git2--ahead-processes)))
-      (cl-pushnew command magit-git2--ahead-commands :test #'equal)
+    (let* ((command (cons (magit-git2--cwd)
+                          (cons magit-git-global-arguments args)))
+           (entry (assoc command magit-git2--ahead-processes)))
+      (cl-pushnew command magit-git2--ahead-asked :test #'equal)
+      (setq magit-git2--ahead-queue
+            (delete command magit-git2--ahead-queue))
       (when entry
         (setq magit-git2--ahead-processes
               (delq entry magit-git2--ahead-processes))
+        ;; The next one starts while Magit waits for this one.
+        (magit-git2--fill-ahead)
         (magit-git2--finish-process (cdr entry))))))
+
+(defun magit-git2--around-refresh (orig &rest args)
+  "Refresh the current Magit buffer with ORIG and ARGS, git ahead of it.
+The commands of the buffer's last refresh start at the first git call
+of this one, and the commands this one asks for are kept for the next."
+  (if (not (eq magit-git2-mode 'on))
+      (apply orig args)
+    (let ((buffer (current-buffer))
+          (magit-git2--ahead-state 'pending)
+          (magit-git2--ahead-queue (and (> magit-git2-ahead-processes 0)
+                                        magit-git2--ahead-commands))
+          (magit-git2--ahead-processes nil)
+          (magit-git2--ahead-asked nil)
+          (done nil))
+      (unwind-protect
+          (prog1 (apply orig args)
+            (setq done t))
+        (magit-git2--drop-ahead)
+        (when (and done (buffer-live-p buffer))
+          (with-current-buffer buffer
+            (setq magit-git2--ahead-commands
+                  (reverse magit-git2--ahead-asked))))))))
 
 (defun magit-git2--answer (args destination)
   "Answer the local git ARGS for DESTINATION; return the exit code.
 Nil when git has to run."
   (when (magit-git2--usable-p destination)
+    (unless (equal args '("update-index" "--refresh"))
+      (magit-git2--start-ahead))
     (cond ((magit-git2--redundant-p args destination)
            (magit-git2--count (car args) 'skipped)
            (magit-git2--start-ahead)
@@ -1951,9 +2008,10 @@ Nil when git has to run."
 
 (advice-add 'magit-process-git :around #'magit-git2--around
             '((name . magit-git2)))
+(advice-add 'magit-refresh-buffer :around #'magit-git2--around-refresh
+            '((name . magit-git2)))
 
 (add-hook 'magit-unwind-refresh-hook #'magit-git2--release-if-loaded)
-(add-hook 'magit-unwind-refresh-hook #'magit-git2--drop-ahead)
 
 (defun magit-git2--release-if-loaded ()
   "Free the module's repository handles, if the module is loaded."
