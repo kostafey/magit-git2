@@ -103,10 +103,11 @@ The download runs in the background with messages at its start and end, so
 Magit does not wait: it runs git until the module is there, and then
 `magit-git2-core-loaded-hook` runs. It takes `curl`, as a process blocks Emacs
 neither on DNS nor on TLS; Windows has one since version 10, and it reads the
-Windows certificate store. If it fails, the message says why and Magit goes on
-with git. Then `M-x magit-git2-download-module` tries again. Where the network
-blocks it, get the file from the release page and save it in that directory
-as `magit-git2-core.so` (`magit-git2-core.dll` on Windows).
+Windows certificate store. `magit-git2-core-curl-extra-args` adds arguments
+to it, such as a proxy. If the download fails, the message says why and Magit
+goes on with git. Then `M-x magit-git2-download-module` tries again. Where the
+network blocks it, get the file from the release page and save it in that
+directory as `magit-git2-core.so` (`magit-git2-core.dll` on Windows).
 
 A release build lands there only if its SHA-256 is the one pinned in
 `lisp/magit-git2-release.el`, under a name with that hash: a new build goes

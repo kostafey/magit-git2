@@ -756,6 +756,17 @@ files `module-load' got in LOADED and the hook's runs in RAN."
     (should (equal loaded (list file)))
     (should (= ran 1))))
 
+(ert-deftest magit-git2-test-download-curl-args ()
+  "The extra arguments reach curl."
+  :tags '(git2)
+  (magit-git2-test--with-release
+    ;; Only the first bytes of the build arrive, so its hash is wrong.
+    (let ((magit-git2-core-curl-extra-args '("--range" "0-2")))
+      (magit-git2-core-ensure)
+      (magit-git2-test--await-download))
+    (should (string-search "SHA-256" magit-git2-core-error))
+    (should-not loaded)))
+
 (ert-deftest magit-git2-test-no-download ()
   "Nothing is downloaded with a module file at hand, or with no build."
   :tags '(git2)

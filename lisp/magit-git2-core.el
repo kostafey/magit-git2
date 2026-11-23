@@ -50,6 +50,15 @@ over the release build, which goes here too."
   "The URL the releases are under."
   :type 'string)
 
+(defcustom magit-git2-core-curl-extra-args nil
+  "Extra arguments for the curl that downloads the release build.
+A list of strings, each a curl command line argument, such as
+\(\"--proxy\" \"http://proxy:3128\") or (\"--cacert\" \"/etc/my-ca.pem\").
+They follow the options this package passes, so where curl takes the
+last of an option, as with \"--max-time\", they override it.  They
+must not write the download elsewhere or make curl print to stdout."
+  :type '(repeat string))
+
 (defvar magit-git2-core-loaded-hook nil
   "Run once the module is loaded, which a download can delay.
 See `magit-git2-core-ensure'.")
@@ -177,10 +186,11 @@ git until it is ready" (magit-git2-core--platform))
                :buffer (generate-new-buffer " *magit-git2-download*")
                :connection-type 'pipe
                :noquery t
-               :command (list "curl" "--fail" "--silent" "--show-error"
-                              "--location" "--connect-timeout" "30"
-                              "--max-time" "300"
-                              "--output" (file-name-nondirectory part) url)
+               :command `("curl" "--fail" "--silent" "--show-error"
+                          "--location" "--connect-timeout" "30"
+                          "--max-time" "300"
+                          ,@magit-git2-core-curl-extra-args
+                          "--output" ,(file-name-nondirectory part) ,url)
                :sentinel
                (lambda (process _event)
                  (unless (process-live-p process)
